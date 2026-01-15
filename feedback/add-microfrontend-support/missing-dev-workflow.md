@@ -1,12 +1,8 @@
-# Local Development Comments
+# Missing Development Workflow and Dev Server Configuration
 
-This document contains comments related to local development workflow, dev server configuration, and integration testing in the `add-microfrontend-support` proposal. These are essential infrastructure requirements for developing microfrontends as part of the host application, not just developer experience improvements.
+This comment addresses essential infrastructure requirements for developing microfrontends as part of the host application, not just developer experience improvements.
 
----
-
-## 1. Missing Development Workflow and Dev Server Configuration
-
-### Problem
+## Problem
 
 The proposal provides no guidance on how to develop MFEs locally during development. There is no specification for:
 - Dev server configuration
@@ -24,9 +20,9 @@ interface MfManifest {
 // No mechanism to override this for development
 ```
 
-### Why Dev Server is Needed
+## Why Dev Server is Needed
 
-#### 1. Integration Testing with Host Application
+### 1. Integration Testing with Host Application
 
 **Developers need to test their MFE within the actual host application:**
 
@@ -50,22 +46,22 @@ const manifest = {
 # Start fragment dev server in proxy mode
 cd analytics-fragment
 npm run dev -- --proxy-target=https://staging.example.com
-# → Dev server starts at http://localhost:3001
+# -> Dev server starts at http://localhost:3001
 
 # Dev server behavior:
-# 1. Proxies root request to target environment: GET / → https://staging.example.com/
+# 1. Proxies root request to target environment: GET / -> https://staging.example.com/
 # 2. Gets host app HTML from target environment
 # 3. Serves the HTML to browser
-# 4. Intercepts requests to current fragment: /fragments/analytics/* → localhost
-# 5. Proxies all other fragments to target: /fragments/billing/* → staging
-# 6. Proxies API requests: /api/* → staging
+# 4. Intercepts requests to current fragment: /fragments/analytics/* -> localhost
+# 5. Proxies all other fragments to target: /fragments/billing/* -> staging
+# 6. Proxies API requests: /api/* -> staging
 
 # Result: Full host app loaded from target environment, only analytics fragment local
 # No host app code changes needed
 # Can use host app debug API to override settings for development
 ```
 
-#### 2. Versioned Path Handling
+### 2. Versioned Path Handling
 
 **Dev server must serve content at versioned paths matching production:**
 
@@ -89,7 +85,7 @@ http://localhost:3001/fragments/analytics/dev/main.dev.js
 - Integration testing not realistic
 - Path mismatches cause bugs in production
 
-#### 3. Translation File Hot Reload
+### 3. Translation File Hot Reload
 
 **Developers need to see translation changes immediately:**
 
@@ -111,7 +107,7 @@ src/translations/en-US.json
 - Must rebuild to see translation changes
 - Slow iteration on internationalization
 
-#### 4. Multi-Fragment Development (One Local, Others Remote)
+### 4. Multi-Fragment Development (One Local, Others Remote)
 
 **Developer works on one fragment while using others from deployed environment:**
 
@@ -119,15 +115,15 @@ src/translations/en-US.json
 # Start analytics fragment dev server with proxy mode enabled
 cd analytics-fragment
 npm run dev -- --proxy-target=https://staging.example.com
-# → Opens browser at http://localhost:3001/
+# -> Opens browser at http://localhost:3001/
 
 # What happens:
-# 1. Dev server proxies GET / → https://staging.example.com/
+# 1. Dev server proxies GET / -> https://staging.example.com/
 # 2. Target environment returns host app HTML
 # 3. Host app HTML includes: <script src="/fragments/analytics/main.abc123.js">
-# 4. Browser requests /fragments/analytics/* → intercepted by dev server (local)
-# 5. Browser requests /fragments/billing/* → proxied to target (remote)
-# 6. Browser requests /api/* → proxied to target (backend)
+# 4. Browser requests /fragments/analytics/* -> intercepted by dev server (local)
+# 5. Browser requests /fragments/billing/* -> proxied to target (remote)
+# 6. Browser requests /api/* -> proxied to target (backend)
 
 # Result:
 # - Full host app from target environment (including real routing, auth, etc.)
@@ -163,7 +159,7 @@ This can be configured via command-line flags or environment variables.
 - **Debug API integration** - Can use host app's debug tools to override settings
 - **Fast iteration** - HMR on local fragment, everything else stays stable
 
-### Comparison with Fragment System
+## Comparison with Fragment System
 
 **Fragment System dev server provides:**
 
@@ -178,7 +174,7 @@ This can be configured via command-line flags or environment variables.
 | **Proxy mode** | One local, others remote | Not specified |
 | **HMR support** | Vite HMR | Not specified |
 
-### What MFE System Needs
+## What MFE System Needs
 
 **The proposal should specify:**
 
@@ -215,35 +211,35 @@ This can be configured via command-line flags or environment variables.
    - How to configure it?
    - Limitations or caveats?
 
-### Example Development Workflow (What's Missing)
+## Example Development Workflow (What's Missing)
 
 **Fragment System workflow (Proxy Mode):**
 ```bash
 # 1. Start analytics fragment dev server with proxy to target environment
 cd analytics-fragment
 npm run dev -- --proxy-target=https://staging.example.com
-# → Server at http://localhost:3001
-# → Opens browser at http://localhost:3001/
-# → Proxies host app from target: GET / → https://staging.example.com/
-# → Intercepts analytics fragment: /fragments/analytics/* → localhost
-# → Proxies everything else to target environment
+# -> Server at http://localhost:3001
+# -> Opens browser at http://localhost:3001/
+# -> Proxies host app from target: GET / -> https://staging.example.com/
+# -> Intercepts analytics fragment: /fragments/analytics/* -> localhost
+# -> Proxies everything else to target environment
 
 # 2. Browser loads
-# - Host app HTML from target environment ✅
-# - Analytics fragment from localhost (HMR enabled) ✅
-# - All other fragments from target environment ✅
-# - API requests to target backend ✅
-# - Auth flows work (real OIDC from target) ✅
+# - Host app HTML from target environment
+# - Analytics fragment from localhost (HMR enabled)
+# - All other fragments from target environment
+# - API requests to target backend
+# - Auth flows work (real OIDC from target)
 
 # 3. Edit code
 vim src/Dashboard.tsx
-# → HMR updates browser instantly
-# → No rebuild needed
-# → Everything else (host, other fragments, APIs) unchanged
+# -> HMR updates browser instantly
+# -> No rebuild needed
+# -> Everything else (host, other fragments, APIs) unchanged
 
 # 4. Edit translations
 vim src/translations/en-US.json
-# → Page reloads with new translations
+# -> Page reloads with new translations
 
 # 5. Host app debug API is accessible
 # Can be used to override configurations during development
@@ -261,7 +257,7 @@ vim src/translations/en-US.json
 # Proposal provides no guidance
 ```
 
-### Impact
+## Impact
 
 **This affects:**
 - **Developer productivity** - Slow feedback loop without HMR and dev server
@@ -276,7 +272,7 @@ vim src/translations/en-US.json
 - Integration testing requires full builds and deployments
 - Slow iteration cycle hurts productivity
 
-### Recommended Solution
+## Recommended Solution
 
 **Proposal should specify:**
 
@@ -287,10 +283,10 @@ vim src/translations/en-US.json
 5. **HMR configuration** and limitations
 6. **Debug API integration** for runtime configuration overrides
 
-### References
+## References
 
 - Fragment System dev server specification
 - Module Federation documentation on dev server setup
 - Related proposal sections:
-  - Section 1: Missing Cache Busting Strategy (manifest URL management)
-  - Section 6: Missing Declarative Metadata (manifest generation)
+  - Missing Cache Busting Strategy (manifest URL management)
+  - Missing Declarative Metadata (manifest generation)
