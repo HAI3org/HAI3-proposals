@@ -88,6 +88,18 @@ export function fragmentReactLocalizationPlugin(): FragmentPlugin {
 }
 ```
 
+## Component mounting (Subfragments)
+
+Fragments can mount other fragments (subfragments) using the same API that the host application uses. This enables composition of micro-frontends where one fragment can embed another fragment within itself.
+
+```tsx
+<FragmentRemoteComponent name="child-fragment-name" props={{ some: 'prop' }} />
+```
+
+> Note: The actual mounting is handled by Federation. `FragmentRemoteComponent` is a convenience wrapper that accesses the Federation API internally.
+
+The unified API ensures consistency across the system - whether mounting from the host application or from within a fragment.
+
 ## Development
 
 The Fragment system comes with a development server that provides features for efficient local development.
