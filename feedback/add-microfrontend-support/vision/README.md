@@ -46,7 +46,8 @@ flowchart LR
 ## Core packages
 
 - `common` - Contains shared TypeScript types and interfaces used by both `federation` and `fragment` packages to ensure type safety across the system.
-- `federation` - The main package installed in the root application. It provides all the functionality needed to load, manage, and communicate with Fragments.
-- `fragment` - The package that each Fragment uses to interact with Federation. It provides APIs for registering components, methods, and accessing Federation services.
+- `federation` - The main package installed in the root application. It provides all the functionality needed to load, manage, and communicate with Fragments, including APIs for registering components and methods.
+- `fragment` - The package that each Fragment uses to interact with Federation. It provides APIs for accessing Federation services.
 - `fragment/react` - A React-specific adapter for the `fragment` package. It converts framework-agnostic data into React primitives like props and hooks.
+- `fragment/vite/react` - Vite plugin for building React fragments. Handles code splitting, manifest generation, dev server setup, and production builds.
 - `fragment-tests/react` - Testing utilities for Fragments that include mocks for Federation interfaces and helpers for setting up test environments.
