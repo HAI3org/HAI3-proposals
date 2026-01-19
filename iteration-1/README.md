@@ -36,9 +36,9 @@ iteration-1/
 
 | Status | Count |
 |--------|-------|
-| Addressed | 2 |
+| Addressed | 3 |
 | Already Addressed | 1 |
-| Pending | 4 |
+| Pending | 3 |
 
 See [responses/README.md](./responses/README.md) for detailed status.
 
@@ -47,3 +47,4 @@ See [responses/README.md](./responses/README.md) for detailed status.
 1. **MfeEntryLifecycle Interface** - New framework-agnostic lifecycle interface replacing React-specific types
 2. **Framework Examples** - Added mount/unmount examples for React, Vue 3, Svelte, Vanilla JS
 3. **Internal vs Public API** - Clarified that `MfeLoader`/`LoadedMfe` are internal implementation details
+4. **Vendor Type Registration** - Added Decision 5 explaining vendor packages, derived types, and polymorphic validation

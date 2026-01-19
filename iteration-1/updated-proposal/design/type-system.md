@@ -859,7 +859,129 @@ function registerHai3Types(
 }
 ```
 
-### Decision 5: ScreensetsRegistry Configuration
+### Decision 5: Vendor Type Registration
+
+Vendors (third-party MFE providers) deliver complete packages containing derived types and instances that extend HAI3's base types. This section explains how vendor packages integrate with the GTS type system.
+
+#### Vendor Package Concept
+
+A vendor package is a self-contained bundle that includes:
+
+1. **Derived Type Definitions (schemas)** - Vendor-specific types that extend HAI3 base types
+2. **Well-Known Instances** - Pre-defined MFE entries, manifests, extensions, and actions
+
+All vendor identifiers follow the pattern `~<vendor>.*.*.*v*` as a GTS qualifier suffix.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    VENDOR PACKAGE                           │
+│                  (e.g., acme-analytics)                     │
+├─────────────────────────────────────────────────────────────┤
+│  Derived Types (schemas):                                   │
+│  - gts.hai3.screensets.ext.action.v1~acme.*.*.*.v1~        │
+│  - gts.hai3.screensets.mfe.entry.v1~acme.*.*.*.v1~         │
+│                                                             │
+│  Instances:                                                 │
+│  - MFE entries, manifests, extensions, actions              │
+│  - All IDs ending with ~acme.*.*.*v*                        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ (delivery mechanism
+                              │  out of scope)
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    HAI3 RUNTIME                             │
+├─────────────────────────────────────────────────────────────┤
+│  TypeSystemPlugin.registerSchema() ← vendor type schemas    │
+│  ScreensetsRegistry.register*()    ← vendor instances       │
+│  Polymorphic validation via GTS derived type IDs            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Derived Types and Polymorphic Validation
+
+Vendor types are **derived types** that extend HAI3 base types using GTS's type derivation mechanism. The derived type ID includes both the base type and the vendor qualifier:
+
+```
+Base type:    gts.hai3.screensets.ext.action.v1~
+                              │
+                              ▼ (extends)
+Derived type: gts.hai3.screensets.ext.action.v1~acme.analytics.ext.data_updated.v1~
+              └──────────── base ────────────┘└────────── vendor qualifier ─────────┘
+```
+
+GTS supports **polymorphic schema resolution**: when the mediator validates an action payload, it uses the derived type's schema (which includes vendor-specific fields) while still recognizing the instance as conforming to the base action contract.
+
+#### Example: Vendor Derived Action Type
+
+A vendor (Acme Analytics) defines a custom action with a vendor-specific payload schema:
+
+```typescript
+// Vendor-defined derived action type
+const acmeDataUpdatedActionTypeId =
+  'gts.hai3.screensets.ext.action.v1~acme.analytics.ext.data_updated.v1~';
+
+// Vendor-specific schema extending base Action
+const acmeDataUpdatedSchema: JSONSchema = {
+  "$id": "gts://gts.hai3.screensets.ext.action.v1~acme.analytics.ext.data_updated.v1~",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    { "$ref": "gts://gts.hai3.screensets.ext.action.v1~" }
+  ],
+  "properties": {
+    "payload": {
+      "type": "object",
+      "properties": {
+        "datasetId": { "type": "string" },
+        "metrics": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["datasetId", "metrics"]
+    }
+  }
+};
+
+// Vendor registers their derived type schema
+plugin.registerSchema(acmeDataUpdatedActionTypeId, acmeDataUpdatedSchema);
+```
+
+When an action instance uses this derived type ID, the mediator:
+1. Recognizes it as an Action (from the base type prefix)
+2. Validates the payload using the derived type's schema (with vendor-specific fields)
+3. Routes it through the standard action mediation flow
+
+#### Key Points
+
+1. **Vendor types are DERIVED types** - They extend HAI3 base types (e.g., `gts.hai3.screensets.ext.action.v1~`) with a vendor qualifier suffix
+2. **GTS polymorphic schema resolution** - The mediator validates payloads using the most specific (derived) type's schema while maintaining base type compatibility
+3. **Delivery mechanism is out of scope** - HOW vendor packages are delivered to the HAI3 runtime is not defined by this proposal
+4. **Interfaces for registration** - The proposal defines the registration interfaces (`TypeSystemPlugin.registerSchema()`, `ScreensetsRegistry.register*()`) that vendor packages use, not the delivery mechanism
+
+#### Vendor Registration Flow
+
+```typescript
+// After vendor package is loaded (delivery mechanism out of scope):
+
+// 1. Register vendor's derived type schemas
+plugin.registerSchema(
+  'gts.hai3.screensets.ext.action.v1~acme.analytics.ext.data_updated.v1~',
+  acmeDataUpdatedSchema
+);
+plugin.registerSchema(
+  'gts.hai3.screensets.mfe.entry.v1~acme.analytics.mfe.chart_widget.v1~',
+  acmeChartWidgetEntrySchema
+);
+
+// 2. Register vendor's instances
+registry.registerManifest(acmeManifest);
+registry.registerEntry(acmeChartWidgetEntry);
+registry.registerExtension(acmeChartExtension);
+```
+
+### Decision 6: ScreensetsRegistry Configuration
 
 The ScreensetsRegistry requires a Type System plugin at initialization:
 
@@ -927,7 +1049,7 @@ const runtimeWithCustomPlugin = createScreensetsRegistry({
 });
 ```
 
-### Decision 6: Framework Plugin Model (No Static Configuration)
+### Decision 7: Framework Plugin Model (No Static Configuration)
 
 **Key Principles:**
 - Screensets is CORE to HAI3 - automatically initialized, NOT a plugin
@@ -991,7 +1113,7 @@ eventBus.on('app/ready', () => {
 });
 ```
 
-### Decision 7: Contract Matching Rules
+### Decision 8: Contract Matching Rules
 
 For an MFE entry to be mountable into an extension domain, the following conditions must ALL be true:
 
@@ -1061,7 +1183,7 @@ function validateContract(
 }
 ```
 
-### Decision 8: Dynamic uiMeta Validation via Attribute Selector
+### Decision 9: Dynamic uiMeta Validation via Attribute Selector
 
 **Problem:** An `Extension` instance has a `domain` field containing a type ID reference, and its `uiMeta` property must conform to that domain's `extensionsUiMeta` schema. This cannot be expressed as a static JSON Schema constraint because the domain reference is a dynamic value.
 
