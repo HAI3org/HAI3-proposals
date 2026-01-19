@@ -14,7 +14,8 @@ iteration-1/
 │       └── vision/                  # Reviewer's reference architecture
 ├── responses/                       # Our responses to feedback
 │   ├── README.md                    # Summary table
-│   └── comments/                    # Individual responses
+│   ├── comments/                    # Individual responses
+│   └── vision/                      # Response to reviewer's architecture vision
 └── updated-proposal/                # Proposal after addressing feedback
     ├── proposal.md
     ├── design/
@@ -38,8 +39,8 @@ iteration-1/
 |--------|-------|
 | Addressed | 3 |
 | Already Addressed | 1 |
+| Design Choice | 2 |
 | Out of Scope | 1 |
-| Pending | 2 |
 
 See [responses/README.md](./responses/README.md) for detailed status.
 
@@ -49,3 +50,5 @@ See [responses/README.md](./responses/README.md) for detailed status.
 2. **Framework Examples** - Added mount/unmount examples for React, Vue 3, Svelte, Vanilla JS
 3. **Internal vs Public API** - Clarified that `MfeLoader`/`LoadedMfe` are internal implementation details
 4. **Vendor Type Registration** - Added Decision 5 explaining vendor packages, derived types, and polymorphic validation
+5. **MFE Independence Philosophy** - Added Decision 21 explaining thin public contracts with private optimization layer
+6. **Architectural Vision Response** - Created vision response comparing HAI3's "independence over integration" model with feedback's "Federation owns implementation" approach
