@@ -38,7 +38,8 @@ iteration-1/
 |--------|-------|
 | Addressed | 3 |
 | Already Addressed | 1 |
-| Pending | 3 |
+| Out of Scope | 1 |
+| Pending | 2 |
 
 See [responses/README.md](./responses/README.md) for detailed status.
 
