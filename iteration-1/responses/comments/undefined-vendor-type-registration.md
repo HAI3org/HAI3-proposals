@@ -36,12 +36,12 @@ Vendors provide complete packages containing:
 │                  (e.g., acme-analytics)                     │
 ├─────────────────────────────────────────────────────────────┤
 │  Derived Types (schemas):                                   │
-│  - gts.hai3.screensets.ext.action.v1~acme.*.*.*.v1~        │
-│  - gts.hai3.screensets.mfe.entry.v1~acme.*.*.*.v1~         │
+│  - gts.hai3.screensets.ext.action.v1~acme.analytics.*.*.v1~│
+│  - gts.hai3.screensets.mfe.entry.v1~acme.analytics.*.*.v1~ │
 │                                                             │
 │  Instances:                                                 │
 │  - MFE entries, manifests, extensions, actions              │
-│  - All IDs ending with ~acme.*.*.*v*                        │
+│  - All IDs ending with ~acme.analytics.*.*v*                │
 └─────────────────────────────────────────────────────────────┘
                               │
                               │ (delivery mechanism
