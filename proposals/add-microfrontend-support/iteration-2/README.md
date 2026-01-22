@@ -22,6 +22,16 @@ This iteration restructures the proposal documentation for improved readability 
 | [registry-runtime.md](./proposal/design/registry-runtime.md) | Runtime isolation and registration |
 | [principles.md](./proposal/design/principles.md) | Design principles |
 
+### Current Change Proposals
+
+| Change | Description | Status | Author |
+|--------|-------------|--------|--------|
+| [mfe-extensibility.md](./changes/mfe-extensibility.md) | Plugin-based extensibility mechanism | - | @eddeisling |
+| [missing-system-extensibility.md](./changes/missing-system-extensibility.md) | System extensibility concerns | - | @eddeisling |
+| [missing-declarative-metadata.md](./changes/missing-declarative-metadata.md) | Declarative metadata for MFE registration | - | @eddeisling |
+| [missing-dev-workflow.md](./changes/missing-dev-workflow.md) | Local development workflow for MFEs | - | @eddeisling |
+| [centralized-services.md](./changes/centralized-services.md) | Centralized services as opt-in company decision | - | @eddeisling |
+
 ### Changes from Iteration 1
 
 The following content was extracted from monolithic files into focused documents:
