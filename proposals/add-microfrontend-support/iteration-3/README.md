@@ -127,6 +127,26 @@ proposal/
 | 16 | Shadow DOM Utilities | registry-runtime.md |
 | 17 | Dynamic Registration Model | registry-runtime.md |
 
+## Responses to Iteration-2 Feedback
+
+This section addresses feedback raised in iteration-2. Each response explains how the current proposal handles the concern.
+
+| Feedback | Status | Response |
+|----------|--------|----------|
+| [Centralized Services](./comments/centralized-services.md) | **Addressed** | Custom `MfeBridgeFactory` allows injecting shared services for internal MFEs |
+| [MFE Extensibility](./comments/mfe-extensibility.md) | **Partially Addressed** | Uses Bridge + React hooks pattern instead of `createMfe().use()` |
+| [Missing Declarative Metadata](./comments/missing-declarative-metadata.md) | **Addressed** | GTS type extensibility allows extending `MfManifest` with custom metadata |
+| [Missing Dev Workflow](./comments/missing-dev-workflow.md) | **Out of Scope** | Tooling docs to be created during implementation phase |
+| [Missing System Extensibility](./comments/missing-system-extensibility.md) | **Addressed** | `MfeHandler` abstract class + `ScreensetsRegistry` events provide extension points |
+
+### Summary
+
+- **3 concerns fully addressed** through architectural changes (centralized services, declarative metadata, system extensibility)
+- **1 concern addressed via alternative approach** (MFE extensibility uses hooks instead of plugins)
+- **1 concern intentionally deferred** (dev workflow - implementation phase deliverable)
+
+---
+
 ## Review Status
 
 **Status:** APPROVED
