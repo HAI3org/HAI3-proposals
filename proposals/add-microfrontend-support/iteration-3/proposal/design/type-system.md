@@ -1,16 +1,17 @@
-# Design: Type System and Contract Definitions
+# Design: Type System and Contract Validation
 
-This document covers the Type System Plugin architecture and GTS type definitions for MFE contracts.
+This document covers the Type System Plugin architecture and contract validation for MFE contracts.
 
 **Related Documents:**
+- [Schemas](./schemas.md) - JSON Schema definitions for all MFE types
 - [Registry and Runtime](./registry-runtime.md) - Runtime isolation, action mediation, bridges
-- [MFE Loading](./mfe-loading.md) - Module Federation loading, error handling, manifest fetching
+- [MFE Loading](./mfe-loading.md) - MfeHandler abstraction, handler registry, Module Federation loading
 
 ---
 
 ## Context
 
-HAI3 needs to support microfrontend (MFE) architecture where independent applications can be composed into a host application. Each MFE is a separately deployed unit with its own HAI3 state instance. Communication between host and MFE must be explicit, type-safe, and controlled.
+HAI3 needs to support microfrontend (MFE) architecture where independent applications can be composed into a parent application. HAI3's default handler enforces instance-level isolation where each MFE **instance** gets its own HAI3 state instance. Custom handlers can implement different isolation strategies for internal MFEs. Communication between parent and MFE instance must be explicit, type-safe, and controlled.
 
 The type system for MFE contracts is abstracted through a **Type System Plugin** interface, allowing different type system implementations while shipping GTS as the default.
 
@@ -20,16 +21,16 @@ The @hai3/screensets package treats **type IDs as opaque strings**. All type ID 
 
 ### Stakeholders
 
-- **HAI3 Host Application**: Defines extension domains and orchestrates MFE communication
+- **HAI3 Parent Application**: Defines extension domains and orchestrates MFE instance communication (parent can be host or another MFE)
 - **MFE Vendors**: Create independently deployable extensions
-- **End Users**: Experience seamless integration of multiple MFEs
+- **End Users**: Experience seamless integration of multiple MFE instances
 - **Type System Providers**: Implement Type System plugin interface for custom type systems
 
 ### Constraints
 
-- State isolation: No direct state access between host and MFE
+- Instance-level state isolation (default): With HAI3's default handler, no direct state access between parent and MFE instance (or between MFE instances). Custom handlers can relax this for internal MFEs.
 - Type safety: All communication contracts defined via pluggable Type System
-- Security: MFEs cannot access host internals
+- Security: MFE instances cannot access parent internals or sibling instance internals (enforced by default handler; custom handlers for internal MFEs may allow sharing)
 - Performance: Lazy loading of MFE bundles
 - Plugin requirement: Type System plugin must be provided at initialization
 
@@ -37,21 +38,21 @@ The @hai3/screensets package treats **type IDs as opaque strings**. All type ID 
 
 ### Goals
 
-1. **State Isolation**: Each MFE has its own HAI3 state instance
+1. **Instance-Level State Isolation (Default)**: HAI3's default handler enforces that each MFE instance has its own HAI3 state instance. Custom handlers can implement different isolation strategies.
 2. **Symmetric Contracts**: Clear bidirectional communication contracts
 3. **Contract Validation**: Compile-time and runtime validation of compatibility
 4. **Mediated Actions**: Centralized action chain delivery through ActionsChainsMediator
-5. **Hierarchical Domains**: Support nested extension points
+5. **Hierarchical Domains**: Support nested extension points at any level (host or MFE)
 6. **Pluggable Type System**: Abstract Type System as a plugin with GTS as default
 7. **Opaque Type IDs**: Screensets package treats type IDs as opaque strings
 
 ### Non-Goals
 
-1. **Direct State Sharing**: No shared Redux store between host and MFE
+1. **Direct State Sharing (default)**: With HAI3's default handler, no shared Redux store between parent and MFE instance. Custom handlers may allow sharing for internal MFEs.
 2. **Event Bus Bridging**: No automatic event propagation across boundaries
 3. **Hot Module Replacement**: MFE updates require reload (but hot-swap of extensions IS supported)
 4. **Version Negotiation**: Single version per MFE entry
-5. **Multiple Concurrent Plugins**: Only one Type System plugin per application instance
+5. **Multiple Concurrent Plugins**: Only one Type System plugin per runtime instance
 6. **Static Extension Registry**: Extensions are NOT known at initialization time (dynamic registration is the model)
 
 ---
@@ -171,6 +172,18 @@ interface TypeSystemPlugin {
    */
   query(pattern: string, limit?: number): string[];
 
+  // === Type Hierarchy ===
+
+  /**
+   * Check if a type ID is of (or derived from) a base type.
+   * Used by MfeHandler.canHandle() for type hierarchy matching.
+   *
+   * @param typeId - The type ID to check
+   * @param baseTypeId - The base type ID to check against
+   * @returns true if typeId is the same as or derived from baseTypeId
+   */
+  isTypeOf(typeId: string, baseTypeId: string): boolean;
+
   // === Compatibility (REQUIRED) ===
 
   /**
@@ -252,6 +265,14 @@ export function createGtsPlugin(): TypeSystemPlugin {
       return GtsQuery.search(gtsStore, pattern, { limit });
     },
 
+    // Type Hierarchy
+    isTypeOf(typeId: string, baseTypeId: string): boolean {
+      // GTS type derivation: derived types include the base type ID as a prefix
+      // e.g., 'gts.hai3.screensets.mfe.entry.v1~acme.corp.mfe.entry_acme.v1~'
+      // is derived from 'gts.hai3.screensets.mfe.entry.v1~'
+      return typeId.startsWith(baseTypeId) || typeId === baseTypeId;
+    },
+
     // Compatibility (REQUIRED)
     checkCompatibility(oldTypeId: string, newTypeId: string) {
       return Gts.checkCompatibility(gtsStore, oldTypeId, newTypeId);
@@ -281,7 +302,7 @@ The GTS type ID format follows the structure: `gts.<vendor>.<package>.<namespace
 
 #### HAI3 GTS Type IDs
 
-The type system is organized into **6 core types** that define the contract model, plus **2 MF-specific types** for Module Federation loading:
+The type system is organized into **6 core types** that define the contract model, plus **2 MF-specific types** for Module Federation loading. See [schemas.md](./schemas.md) for complete schema definitions.
 
 **Core Types (6 total):**
 
@@ -319,32 +340,15 @@ Benefits:
 - **Future-proof**: ESM loader would add `MfeEntryEsm` derived type with its own manifest reference
 - **Clear ownership**: Entry owns its contract AND references its manifest
 
-#### Complete GTS JSON Schema Definitions
-
-The schema definitions are distributed across the following files:
-
-- **MFE Entry Schema (Abstract Base)**: See [MFE Entry](./mfe-entry-mf.md#mfe-entry-schema-abstract-base)
-- **MFE Entry MF Schema (Derived)**: See [MFE Entry](./mfe-entry-mf.md#mfe-entry-mf-schema-derived---module-federation)
-- **MF Manifest Schema (Standalone)**: See [MFE Manifest](./mfe-manifest.md#mf-manifest-schema-standalone)
-- **Extension Domain Schema (Base)**: See [MFE Domain](./mfe-domain.md#extension-domain-schema-base)
-- **Extension Schema**: See [MFE Extension](./mfe-extension.md#extension-schema)
-- **Shared Property Schema**: See [MFE Shared Property](./mfe-shared-property.md#shared-property-schema)
-- **Action Schema**: See [MFE Actions](./mfe-actions.md#action-schema)
-- **Actions Chain Schema**: See [MFE Actions](./mfe-actions.md#actions-chain-schema)
-- **MfeEntry Type Hierarchy**: See [MFE Entry](./mfe-entry-mf.md#mfeentry-type-hierarchy)
-
 ### Decision 3: Internal TypeScript Type Definitions
 
 The MFE system uses internal TypeScript interfaces with a simple `id: string` field as the identifier. When metadata is needed about a type ID, call `plugin.parseTypeId(id)` directly.
 
-#### TypeScript Interface Definitions
-
-All MFE types use `id: string` as their identifier. The interface definitions are distributed across the following files:
+TypeScript interface definitions are distributed across their respective design documents:
 
 - **MfeEntry / MfeEntryMF**: See [MFE Entry](./mfe-entry-mf.md#typescript-interface-definitions)
 - **MfManifest / SharedDependencyConfig**: See [MFE Manifest](./mfe-manifest.md#typescript-interface-definitions)
-- **ExtensionDomain**: See [MFE Domain](./mfe-domain.md#typescript-interface-definition)
-- **Extension**: See [MFE Extension](./mfe-extension.md#typescript-interface-definition)
+- **ExtensionDomain / Extension**: See [MFE Domain](./mfe-domain.md#typescript-interface-definitions)
 - **SharedProperty**: See [MFE Shared Property](./mfe-shared-property.md#typescript-interface-definition)
 - **Action / ActionsChain**: See [MFE Actions](./mfe-actions.md#typescript-interface-definitions)
 - **MfeEntryLifecycle**: See [MFE API](./mfe-api.md#mfeentrylifecycle-interface)
@@ -406,30 +410,32 @@ A vendor package is a self-contained bundle that includes:
 
 All vendor package identifiers follow the pattern `~<vendor>.<package>.*.*v*` as a GTS qualifier suffix.
 
+**Note on Wildcards:** The wildcards (`*`) in this diagram represent pattern matching for documentation purposes only. Actual type IDs use concrete values (e.g., `acme.analytics.ext.data_updated.v1`). Wildcards are used only when explaining pattern matching in `TypeSystemPlugin.query()`.
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    VENDOR PACKAGE                           │
-│                  (e.g., acme-analytics)                     │
-├─────────────────────────────────────────────────────────────┤
-│  Derived Types (schemas):                                   │
-│  - gts.hai3.screensets.ext.action.v1~acme.analytics.*.*.v1~│
-│  - gts.hai3.screensets.mfe.entry.v1~acme.analytics.*.*.v1~ │
-│                                                             │
-│  Instances:                                                 │
-│  - MFE entries, manifests, extensions, actions              │
-│  - All IDs ending with ~acme.analytics.*.*v*                │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              │ (delivery mechanism
-                              │  out of scope)
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    HAI3 RUNTIME                             │
-├─────────────────────────────────────────────────────────────┤
-│  TypeSystemPlugin.registerSchema() ← vendor type schemas    │
-│  ScreensetsRegistry.register*()    ← vendor instances       │
-│  Polymorphic validation via GTS derived type IDs            │
-└─────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------+
+|                    VENDOR PACKAGE                           |
+|                  (e.g., acme-analytics)                     |
++-------------------------------------------------------------+
+|  Derived Types (schemas):                                   |
+|  - gts.hai3.screensets.ext.action.v1~acme.analytics.ext.data_updated.v1~|
+|  - gts.hai3.screensets.mfe.entry.v1~acme.analytics.mfe.chart_widget.v1~ |
+|                                                             |
+|  Instances:                                                 |
+|  - MFE entries, manifests, extensions, actions              |
+|  - All IDs ending with ~acme.analytics.<namespace>.<type>.v*~|
++-------------------------------------------------------------+
+                              |
+                              | (delivery mechanism
+                              |  out of scope)
+                              v
++-------------------------------------------------------------+
+|                    HAI3 RUNTIME                             |
++-------------------------------------------------------------+
+|  TypeSystemPlugin.registerSchema() <- vendor type schemas   |
+|  ScreensetsRegistry.register*()    <- vendor instances      |
+|  Polymorphic validation via GTS derived type IDs            |
++-------------------------------------------------------------+
 ```
 
 #### Derived Types and Polymorphic Validation
@@ -438,10 +444,10 @@ Vendor types are **derived types** that extend HAI3 base types using GTS's type 
 
 ```
 Base type:    gts.hai3.screensets.ext.action.v1~
-                              │
-                              ▼ (extends)
+                              |
+                              v (extends)
 Derived type: gts.hai3.screensets.ext.action.v1~acme.analytics.ext.data_updated.v1~
-              └──────────── base ────────────┘└────────── vendor qualifier ─────────┘
+              +------------ base ------------++---------- vendor qualifier ---------+
 ```
 
 GTS supports **polymorphic schema resolution**: when the mediator validates an action payload, it uses the derived type's schema (which includes vendor-specific fields) while still recognizing the instance as conforming to the base action contract.
@@ -542,7 +548,7 @@ interface ScreensetsRegistryConfig {
   debug?: boolean;
 
   /** MFE loader configuration (enables hosting nested MFEs) */
-  mfeLoader?: MfeLoaderConfig;
+  mfeHandler?: MfeHandlerConfig;
 
   /** Initial parent bridge (if loaded as MFE) */
   parentBridge?: MfeBridgeConnection;
@@ -660,6 +666,20 @@ For an MFE entry to be mountable into an extension domain, the following conditi
 
 3. domain.actions            SUBSET_OF  entry.domainActions
    (MFE can handle all action types that may target it)
+```
+
+The visual representation of contract matching:
+
+```
++-------------------+                      +-------------------+
+|   MfeEntry        |                      |  ExtensionDomain  |
++-------------------+                      +-------------------+
+| requiredProperties| --------subset-----> | sharedProperties  |
+|                   |                      |                   |
+| actions           | --------subset-----> | extensionsActions |
+|                   |                      |                   |
+| domainActions     | <-------subset------ | actions           |
++-------------------+                      +-------------------+
 ```
 
 **Validation Implementation:**

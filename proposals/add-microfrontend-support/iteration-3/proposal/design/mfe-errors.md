@@ -6,7 +6,7 @@ This document covers the error class hierarchy for the MFE system.
 
 ## Context
 
-The MFE system has multiple failure points: [bundle loading](./mfe-loading.md), contract validation, [action chain](./mfe-actions.md) execution, and [domain](./mfe-domain.md)/[extension](./mfe-extension.md) registration. Each failure type requires specific error information for debugging and recovery. The error hierarchy provides typed errors with contextual data for each scenario.
+The MFE system has multiple failure points: [bundle loading](./mfe-loading.md), contract validation, [action chain](./mfe-actions.md) execution, and [domain/extension](./mfe-domain.md) registration. Each failure type requires specific error information for debugging and recovery. The error hierarchy provides typed errors with contextual data for each scenario.
 
 All MFE errors extend MfeError, which provides a base with error code and message. Specific errors add relevant context (type IDs, validation errors, chain execution state).
 
@@ -20,7 +20,7 @@ All MFE errors extend MfeError, which provides a base with error code and messag
 
 ## Decisions
 
-### Decision 16: Error Class Hierarchy
+### Decision 15: Error Class Hierarchy
 
 The MFE system defines a hierarchy of error classes for specific failure scenarios.
 

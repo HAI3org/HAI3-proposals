@@ -124,8 +124,70 @@ interface ActionsChain {
 
 The **ActionsChainsMediator** delivers action chains to targets and handles success/failure branching. The Type System plugin validates all type IDs and payloads.
 
-**Execution Flow:**
+### Execution Flow Diagram
+
 ```
++---------------------------+
+|   Mediator receives       |
+|   ActionsChain            |
++-----------+---------------+
+            |
+            v
++-----------+---------------+
+|   Validate target         |
+|   (typeSystem.isValidId)  |
++-----------+---------------+
+            |
+            v
++-----------+---------------+
+|   Resolve target          |
+|   (domain or extension)   |
++-----------+---------------+
+            |
+            v
++-----------+---------------+
+|   Validate action type    |
+|   against contract        |
++-----------+---------------+
+            |
+            v
++-----------+---------------+
+|   Validate payload        |
+|   (typeSystem.validate)   |
++-----------+---------------+
+            |
+            v
++-----------+---------------+
+|   Deliver to target       |
+|   (await handler)         |
++-----------+---------------+
+            |
+            v
+      +-----+-----+
+      |  Result?  |
+      +-----+-----+
+           /\
+          /  \
+         /    \
+    SUCCESS   FAILURE/TIMEOUT
+       |           |
+       v           v
++------+------+   +------+------+
+| chain.next  |   | chain.      |
+| defined?    |   | fallback    |
++------+------+   | defined?    |
+       |          +------+------+
+      YES              |
+       |              YES
+       v               v
++------+------+   +------+------+
+| Execute     |   | Execute     |
+| next chain  |   | fallback    |
+| (recurse)   |   | (recurse)   |
++-------------+   +-------------+
+```
+
+**Execution Steps:**
 1. ActionsChainsMediator receives chain
 2. Validate chain.action.target via typeSystem.isValidTypeId()
 3. Resolve target (domain or entry instance)
@@ -136,7 +198,6 @@ The **ActionsChainsMediator** delivers action chains to targets and handles succ
 8. If success AND chain.next: mediator executes chain.next
 9. If failure AND chain.fallback: mediator executes chain.fallback
 10. Recurse until no next/fallback
-```
 
 ### ActionsChainsMediator Interface
 

@@ -6,21 +6,23 @@ This document covers the MfeEntry and MfeEntryMF types and their usage in the MF
 
 ## Context
 
-MfeEntry defines the contract that an MFE declares with its hosting [domain](./mfe-domain.md). It specifies what [properties](./mfe-shared-property.md) the MFE requires/accepts and what [action types](./mfe-actions.md) it can send (to its domain) and receive (when targeted). The entry is referenced by [Extension](./mfe-extension.md) to bind an MFE implementation to a specific domain.
+MfeEntry defines the contract that an MFE declares with its hosting [domain](./mfe-domain.md). It specifies what [properties](./mfe-shared-property.md) the MFE requires/accepts and what [action types](./mfe-actions.md) it can send (to its domain) and receive (when targeted). The entry is referenced by [Extension](./mfe-domain.md#extension) to bind an MFE implementation to a specific domain.
 
-MfeEntry is abstract - it defines only the communication contract. MfeEntryMF is the concrete derived type that adds Module Federation-specific [loading](./mfe-loading.md) configuration ([manifest](./mfe-manifest.md) reference, exposed module path).
+MfeEntry is abstract - it defines only the communication contract. Derived types add loader-specific fields. HAI3 ships MfeEntryMF (Module Federation) as the default, but companies can create their own derived types with richer contracts.
 
 ## Definition
 
-**MfeEntry**: An abstract base GTS type defining the communication contract of an MFE - required/optional properties and bidirectional action capabilities.
+**MfeEntry**: An abstract base GTS type defining the communication contract of an MFE - required/optional properties and bidirectional action capabilities. This is a **thin contract** that focuses purely on communication semantics.
 
-**MfeEntryMF**: A derived GTS type extending MfeEntry with Module Federation 2.0 loading configuration - references an MfManifest and specifies the exposed module path.
+**MfeEntryMF**: HAI3's default derived GTS type extending MfeEntry with Module Federation 2.0 loading configuration - references an MfManifest and specifies the exposed module path. This is also a thin contract suitable for 3rd-party vendors.
+
+**Custom Derived Types**: Companies can create their own derived entry types (e.g., `MfeEntryAcme`) with richer contracts including metadata, translations, preload assets, feature flags, etc. These custom types are handled by custom [MfeHandler](./mfe-loading.md#decision-10-mfehandler-abstraction-and-registry) implementations registered by the company.
 
 ---
 
 ## MFE Entry Schema (Abstract Base)
 
-MfeEntry is the **abstract base type** for all entry contracts. It defines ONLY the communication interface (properties, actions). Derived types add loader-specific fields.
+MfeEntry is the **abstract base type** for all entry contracts. It defines ONLY the communication contract (properties, actions). Derived types add loader-specific fields.
 
 ```json
 {
@@ -85,6 +87,8 @@ The Module Federation derived type adds fields specific to Webpack 5 / Rspack Mo
 
 ## MfeEntry Type Hierarchy
 
+The type hierarchy supports extensibility - companies can create their own derived entry types with richer contracts while maintaining compatibility with the base contract:
+
 ```
 gts.hai3.screensets.mfe.entry.v1~ (Base - Abstract Contract)
   |-- id: string (GTS type ID)
@@ -93,10 +97,15 @@ gts.hai3.screensets.mfe.entry.v1~ (Base - Abstract Contract)
   |-- actions: x-gts-ref[] -> gts.hai3.screensets.ext.action.v1~*
   |-- domainActions: x-gts-ref[] -> gts.hai3.screensets.ext.action.v1~*
   |
-  +-- gts.hai3.screensets.mfe.entry.v1~hai3.screensets.mfe.entry_mf.v1~ (Module Federation)
+  +-- gts.hai3.screensets.mfe.entry.v1~hai3.screensets.mfe.entry_mf.v1~ (HAI3 Default - Module Federation)
+  |     |-- (inherits contract fields from base)
+  |     |-- manifest: x-gts-ref -> gts.hai3.screensets.mfe.mf.v1~*
+  |     |-- exposedModule: string
+  |
+  +-- gts.hai3.screensets.mfe.entry.v1~<company>.<package>.mfe.entry_<name>.v1~ (Company Custom)
         |-- (inherits contract fields from base)
-        |-- manifest: x-gts-ref -> gts.hai3.screensets.mfe.mf.v1~*
-        |-- exposedModule: string
+        |-- (company-specific loader fields: manifest, exposedModule, etc.)
+        |-- (company-specific metadata: translations, routes, preloadAssets, etc.)
 
 gts.hai3.screensets.mfe.mf.v1~ (Standalone - Module Federation Config)
   |-- id: string (GTS type ID)
@@ -108,6 +117,37 @@ gts.hai3.screensets.mfe.mf.v1~ (Standalone - Module Federation Config)
   |     |-- singleton?: boolean (default: false = isolated instances)
   |-- entries?: x-gts-ref[] -> gts.hai3.screensets.mfe.entry.v1~hai3.screensets.mfe.entry_mf.v1~*
 ```
+
+### Company Custom Entry Types
+
+Companies can define their own derived entry types that:
+1. **Extend the base contract** - Inherit requiredProperties, actions, domainActions
+2. **Add loader-specific fields** - manifest, exposedModule (if using MF), or custom loader fields
+3. **Add company-specific metadata** - translations, routes, preloadAssets, featureFlags, etc.
+
+These custom entry types are handled by company-registered [MfeHandler](./mfe-loading.md#decision-10-mfehandler-abstraction-and-registry) implementations.
+
+**Example: Company Custom Entry Type**
+
+```typescript
+// Company-defined derived entry type
+interface MfeEntryAcme extends MfeEntry {
+  // Loader fields (still uses Module Federation under the hood)
+  manifest: string;
+  exposedModule: string;
+
+  // Company-specific metadata
+  translations?: Record<string, Record<string, string>>;
+  routes?: string[];
+  preloadAssets?: string[];
+  requiredFeatureFlags?: string[];
+}
+
+// GTS Type ID (derived from MfeEntry)
+// gts.hai3.screensets.mfe.entry.v1~acme.corp.mfe.entry_acme.v1~
+```
+
+See [MFE Loading - Decision 10](./mfe-loading.md#decision-10-mfehandler-abstraction-and-registry) for how custom handlers handle these derived types.
 
 ## TypeScript Interface Definitions
 

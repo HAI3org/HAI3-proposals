@@ -1,6 +1,13 @@
-# Design: MFE Loading and Error Handling
+# Design: MFE Loading and Handler Architecture
 
-This document covers Module Federation 2.0 bundle loading and manifest fetching strategies.
+This document covers the MfeHandler abstraction, handler registry, and Module Federation 2.0 bundle loading.
+
+**Related Documents:**
+- [Type System](./type-system.md) - TypeSystemPlugin interface, GTS implementation
+- [MFE Entry](./mfe-entry-mf.md) - MfeEntry and MfeEntryMF types
+- [MFE Manifest](./mfe-manifest.md) - MfManifest type
+- [MFE API](./mfe-api.md) - MfeEntryLifecycle and MfeBridge interfaces
+- [MFE Errors](./mfe-errors.md) - Error class hierarchy
 
 ---
 
@@ -8,19 +15,227 @@ This document covers Module Federation 2.0 bundle loading and manifest fetching 
 
 MFE loading is the process of fetching and initializing remote MFE bundles at runtime. The system uses Module Federation 2.0 as the underlying mechanism, which provides code sharing, dependency management, and dynamic module resolution. The loader works with [MfeEntryMF](./mfe-entry-mf.md) (which defines the entry contract) and [MfManifest](./mfe-manifest.md) (which defines the Module Federation configuration).
 
-The loading process must handle network failures, validation [errors](./mfe-errors.md), and version mismatches while maintaining runtime isolation between MFEs.
+The loading process must handle network failures, validation [errors](./mfe-errors.md), and version mismatches. HAI3's default handler (`MfeHandlerMF`) enforces runtime isolation between MFE instances, while custom handlers can implement different isolation strategies.
 
-## Definition
+## Definitions
 
-**MfeLoader**: An internal implementation component that loads MFE bundles using Module Federation 2.0. It resolves manifests, initializes remote containers, and returns the MfeEntryLifecycle interface for mounting.
+**MfeHandler**: An abstract class that handles loading MFE bundles for specific entry types. Handlers use type hierarchy matching to determine which entries they can handle.
 
-**ManifestFetcher**: A strategy interface for resolving MfManifest instances from their type IDs. Implementations include URL-based, registry-based, and composite fetchers.
+**MfeBridgeFactory**: An abstract factory that creates bridge instances for MFEs. Each handler has an associated bridge factory.
+
+**MfeLoader**: An internal implementation component that loads MFE bundles using Module Federation 2.0.
+
+**ManifestFetcher**: A strategy interface for resolving MfManifest instances from their type IDs.
 
 ---
 
 ## Decisions
 
-### Decision 12: Module Federation 2.0 for Bundle Loading
+### Decision 10: MfeHandler Abstraction and Registry
+
+The GTS type system enables companies to create custom derived entry types with richer contracts. The MfeHandler Registry uses type hierarchy matching to route entries to the correct handler.
+
+#### Handler Architecture
+
+```
+TYPE SYSTEM (GTS)                           HANDLER REGISTRY
+================                            ================
+
+MfeEntry (abstract)                         MfeHandler (abstract class)
+    |                                           |
+    +-- MfeEntryMF                              +-- MfeHandlerMF
+    |   (thin, stable)                          |   handledBaseTypeId: ~hai3.screensets.mfe.entry_mf.*
+    |                                           |   bridgeFactory: MfeBridgeFactoryDefault
+    |                                           |
+    +-- MfeEntryAcme                            +-- MfeHandlerAcme
+        (richer contract)                           handledBaseTypeId: ~acme.corp.mfe.entry_acme.*
+                                                    bridgeFactory: MfeBridgeFactoryAcme (with shared services)
+```
+
+#### MfeHandler Abstract Class
+
+```typescript
+// packages/screensets/src/mfe/handler/index.ts
+
+/**
+ * Abstract handler for loading MFE bundles.
+ * Subclasses implement loading logic for specific entry types.
+ */
+abstract class MfeHandler<TEntry extends MfeEntry = MfeEntry, TBridge extends MfeBridge = MfeBridge> {
+  /** The base type ID this handler can handle */
+  readonly handledBaseTypeId: string;
+
+  /** Priority for handler selection (higher = checked first) */
+  readonly priority: number;
+
+  /** Factory for creating bridges for loaded MFEs */
+  abstract readonly bridgeFactory: MfeBridgeFactory<TBridge>;
+
+  constructor(
+    protected readonly typeSystem: TypeSystemPlugin,
+    handledBaseTypeId: string,
+    priority: number = 0
+  ) {
+    this.handledBaseTypeId = handledBaseTypeId;
+    this.priority = priority;
+  }
+
+  /**
+   * Check if this handler can handle the given entry type.
+   * Uses type system hierarchy matching.
+   */
+  canHandle(entryTypeId: string): boolean {
+    return this.typeSystem.isTypeOf(entryTypeId, this.handledBaseTypeId);
+  }
+
+  /**
+   * Load an MFE bundle and return its lifecycle interface.
+   */
+  abstract load(entry: TEntry): Promise<MfeEntryLifecycle>;
+
+  /**
+   * Preload MFE bundles for faster mounting.
+   */
+  abstract preload(entries: TEntry[]): Promise<void>;
+}
+```
+
+#### MfeBridgeFactory Abstract Class
+
+```typescript
+// packages/screensets/src/mfe/bridge/factory.ts
+
+/**
+ * Abstract factory for creating MFE bridges.
+ * Companies can implement rich factories with shared services.
+ */
+abstract class MfeBridgeFactory<TBridge extends MfeBridge = MfeBridge> {
+  /**
+   * Create a bridge for an MFE.
+   * @param domainId - The domain the MFE is mounted in
+   * @param entryTypeId - The entry type ID
+   * @param instanceId - Unique instance ID for this bridge
+   */
+  abstract create(
+    domainId: string,
+    entryTypeId: string,
+    instanceId: string
+  ): TBridge;
+
+  /**
+   * Dispose a bridge and clean up resources.
+   */
+  abstract dispose(bridge: TBridge): void;
+}
+
+/**
+ * Default bridge factory - creates minimal MfeBridge instances.
+ */
+class MfeBridgeFactoryDefault extends MfeBridgeFactory<MfeBridge> {
+  create(domainId: string, entryTypeId: string, instanceId: string): MfeBridge {
+    return new MfeBridgeImpl(domainId, entryTypeId, instanceId);
+  }
+
+  dispose(bridge: MfeBridge): void {
+    (bridge as MfeBridgeImpl).cleanup();
+  }
+}
+```
+
+#### Type ID Matching in Handlers
+
+Each handler's `canHandle()` method (inherited from base class) uses the type system to determine if it can handle an entry:
+
+```typescript
+// HAI3's default MF handler - handles MfeEntryMF
+class MfeHandlerMF extends MfeHandler<MfeEntryMF, MfeBridge> {
+  readonly bridgeFactory = new MfeBridgeFactoryDefault();
+
+  constructor(typeSystem: TypeSystemPlugin) {
+    // Pass the base type ID this handler handles
+    super(typeSystem, 'gts.hai3.screensets.mfe.entry.v1~hai3.screensets.mfe.entry_mf.v1~');
+  }
+
+  // canHandle() inherited from base class uses:
+  // this.typeSystem.isTypeOf(entryTypeId, this.handledBaseTypeId)
+
+  async load(entry: MfeEntryMF): Promise<MfeEntryLifecycle> {
+    // Module Federation loading logic
+    const manifest = await this.resolveManifest(entry.manifest);
+    const container = await this.loadRemoteContainer(manifest);
+    const moduleFactory = await container.get(entry.exposedModule);
+    return moduleFactory();
+  }
+
+  async preload(entries: MfeEntryMF[]): Promise<void> {
+    // Preload manifests and containers
+  }
+}
+
+// Company's custom handler - handles MfeEntryAcme with rich bridges
+class MfeHandlerAcme extends MfeHandler<MfeEntryAcme, MfeBridgeAcme> {
+  readonly bridgeFactory: MfeBridgeFactoryAcme;
+
+  constructor(typeSystem: TypeSystemPlugin, router: Router, apiClient: ApiClient) {
+    super(typeSystem, 'gts.hai3.screensets.mfe.entry.v1~acme.corp.mfe.entry_acme.v1~', 100);
+    this.bridgeFactory = new MfeBridgeFactoryAcme(router, apiClient);
+  }
+
+  async load(entry: MfeEntryAcme): Promise<MfeEntryLifecycle> {
+    // Custom loading with preload assets, feature flags, etc.
+  }
+}
+```
+
+#### Priority-Based Selection
+
+When multiple handlers can handle an entry (e.g., a company handler extends MfeHandlerMF), priority determines which is used:
+
+| Handler | Priority | Handles | Bridge |
+|---------|----------|---------|--------|
+| MfeHandlerAcme | 100 | Company's richer entries | Rich (with shared services) |
+| MfeHandlerMF | 0 | HAI3's thin entries, fallback for others | Thin (minimal contract) |
+
+Company handlers use higher priority to ensure their derived types are handled by their custom handlers, not the generic MfeHandlerMF. This also ensures internal MFEs get rich bridges with shared services.
+
+#### Handler Registry
+
+```typescript
+// packages/screensets/src/mfe/handler/registry.ts
+
+class MfeHandlerRegistry {
+  private handlers: MfeHandler[] = [];
+
+  /**
+   * Register a handler. Handlers are sorted by priority (highest first).
+   */
+  register(handler: MfeHandler): void {
+    this.handlers.push(handler);
+    this.handlers.sort((a, b) => b.priority - a.priority);
+  }
+
+  /**
+   * Find the handler for an entry type.
+   * Returns the first handler (highest priority) that can handle the entry.
+   */
+  getHandler(entryTypeId: string): MfeHandler | undefined {
+    return this.handlers.find(h => h.canHandle(entryTypeId));
+  }
+
+  /**
+   * Load an entry using the appropriate handler.
+   */
+  async load(entry: MfeEntry): Promise<MfeEntryLifecycle> {
+    const handler = this.getHandler(entry.id);
+    if (!handler) {
+      throw new MfeLoadError(`No handler found for entry type`, entry.id);
+    }
+    return handler.load(entry);
+  }
+}
+```
+
+### Decision 11: Module Federation 2.0 for Bundle Loading
 
 **What**: Use Webpack 5 / Rspack Module Federation 2.0 for loading remote MFE bundles.
 
@@ -37,138 +252,68 @@ Module Federation's shared dependencies provide TWO independent benefits:
 1. **Code/Bundle Sharing** (Performance)
    - When a dependency is listed in `shared`, the code is downloaded once and cached
    - All consumers (host and MFEs) use the cached bundle
-   - This reduces total download size and improves load times
 
 2. **Runtime Instance Control** (Isolation vs Sharing)
-   - The `singleton` flag controls whether consumers share the same instance
    - `singleton: false` (DEFAULT): Each consumer gets its OWN instance from the shared code
    - `singleton: true`: All consumers share the SAME instance
 
-**Key Insight**: These benefits are NOT mutually exclusive. With `singleton: false`, you get BOTH:
-- Code is shared (bundle optimization)
-- Instances are isolated (runtime isolation)
+**Key Insight**: With `singleton: false`, you get BOTH code sharing AND instance isolation.
 
 #### Why `singleton: false` is the Correct Default
 
-HAI3's architecture requires runtime isolation between MFEs. Setting `singleton: false` ensures:
+HAI3's default handler (`MfeHandlerMF`) enforces runtime isolation between MFE **instances**. This is achieved through `singleton: false` in Module Federation configuration:
 
-1. **React State Isolation**: Each MFE has its own React context, hooks state, and reconciler
-2. **TypeSystemPlugin Isolation**: Each MFE's schema registry is isolated (security requirement)
-3. **@hai3/screensets Isolation**: Each MFE has its own state container
+1. **React State Isolation**: Each MFE instance has its own React context, hooks state, and reconciler
+2. **TypeSystemPlugin Isolation**: Each MFE instance's schema registry is isolated (security requirement for 3rd-party MFEs)
+3. **@hai3/screensets Isolation**: Each MFE instance has its own state container
 
-Without this isolation, MFEs could:
-- Corrupt each other's React state
-- Discover host schemas via `plugin.query('gts.*')` (security violation)
-- Interfere with each other's state management
+**Custom handlers** can choose to use `singleton: true` for internal MFE instances when isolation is not required, allowing shared state for coordination between trusted MFEs.
+
+**Isolation Recommendations:**
+
+| MFE Source | Isolation Strategy | Reason |
+|------------|-------------------|--------|
+| 3rd-party/vendor MFEs | Always `singleton: false` | Security - untrusted code must not share state |
+| Internal MFEs (custom handler) | Handler's choice | Trusted code can share if beneficial |
 
 #### When `singleton: true` is Safe
-
-Only use `singleton: true` for libraries that are **truly stateless**:
 
 | Library | singleton | Reason |
 |---------|-----------|--------|
 | lodash | `true` | Pure functions, no internal state |
 | date-fns | `true` | Pure functions, no internal state |
-| uuid | `true` | Pure functions, no internal state |
 | React | `false` | Has hooks state, context, reconciler |
 | ReactDOM | `false` | Has fiber tree, event system |
 | @hai3/* | `false` | Has TypeSystemPlugin, schema registry |
-| GTS | `false` | Has schema registry |
-| Redux/Zustand | `false` | Has store state |
 
-#### Performance vs Isolation Trade-offs
-
-| Configuration | Bundle Size | Memory | Isolation |
-|--------------|-------------|--------|-----------|
-| Not in `shared` | Duplicated | Duplicated | Full |
-| `shared` + `singleton: false` | Shared | Duplicated | Full |
-| `shared` + `singleton: true` | Shared | Shared | None |
-
-**HAI3 Recommendation**: Use `singleton: false` for all stateful libraries. The memory overhead of duplicate instances is negligible compared to the complexity of debugging shared state issues across MFE boundaries.
-
-**MfeLoader (Internal Implementation Detail):**
-
-Note: `MfeLoader` and its return types are **internal implementation details** of the ScreensetsRegistry. The public API is `ScreensetsRegistry.mountExtension()` which handles loading and mounting internally. This documentation is provided for implementers only.
-
-The internal MfeLoader uses the [`MfeEntryMF`](./mfe-entry-mf.md) derived type which references an [`MfManifest`](./mfe-manifest.md):
+#### MfeLoader (Internal Implementation Detail)
 
 ```typescript
 // packages/screensets/src/mfe/loader/index.ts (INTERNAL)
 
 /** @internal */
 interface MfeLoaderConfig {
-  /** Timeout for bundle loading in ms (default: 30000) */
-  timeout?: number;
-  /** Retry attempts on load failure (default: 2) */
-  retries?: number;
-  /** Enable preloading of known MFEs */
+  timeout?: number;   // default: 30000
+  retries?: number;   // default: 2
   preload?: boolean;
 }
 
-/**
- * Lifecycle interface for MFE entries (PUBLIC).
- * Defines lifecycle methods that any MFE entry must implement,
- * regardless of framework (React, Vue, Angular, Vanilla JS).
- *
- * The name "MfeEntryLifecycle" is chosen because:
- * - It focuses on lifecycle semantics (mount/unmount)
- * - It's extensible for future lifecycle methods (onSuspend, onResume, etc.)
- * - It doesn't include implementation details like "Export" or "Module" in the name
- *
- * Example implementations:
- * - React MFE: Uses ReactDOM.createRoot(container).render(<App bridge={bridge} />)
- * - Vue MFE: Uses createApp(App, { bridge }).mount(container)
- * - Angular MFE: Uses platformBrowserDynamic().bootstrapModule(...)
- * - Svelte MFE: Uses new App({ target: container, props: { bridge } })
- * - Vanilla JS: Directly manipulates DOM
- */
 interface MfeEntryLifecycle {
-  /**
-   * Mount the MFE into a container element.
-   * @param container - The DOM element to mount into
-   * @param bridge - The MfeBridge for host-MFE communication
-   */
   mount(container: HTMLElement, bridge: MfeBridge): void;
-
-  /**
-   * Unmount the MFE from a container element.
-   * Called when the extension is unloaded or the container is removed.
-   * @param container - The DOM element to unmount from
-   */
   unmount(container: HTMLElement): void;
 }
 
-/**
- * @internal - Not part of public API
- * Result of loading an MFE bundle internally
- */
+/** @internal */
 interface LoadedMfeInternal {
-  /** The loaded MFE lifecycle interface */
   lifecycle: MfeEntryLifecycle;
-  /** The entry that was loaded (Module Federation variant) */
   entry: MfeEntryMF;
-  /** The manifest used for loading */
   manifest: MfManifest;
-  /** Cleanup function to unload the MFE */
   unload: () => void;
 }
 
-/**
- * @internal - Not part of public API
- * MFE Loader using Module Federation 2.0
- */
+/** @internal */
 class MfeLoader {
-  /** GTS Type ID for Module Federation MFE entries */
-  private static readonly MF_ENTRY_TYPE_ID =
-    'gts.hai3.screensets.mfe.entry.v1~hai3.screensets.mfe.entry_mf.v1~';
-
-  /** GTS Type ID for Module Federation manifests */
-  private static readonly MF_MANIFEST_TYPE_ID =
-    'gts.hai3.screensets.mfe.mf.v1~';
-
-  // Cache of loaded manifests by type ID
   private loadedManifests = new Map<string, MfManifest>();
-  // Cache of loaded containers by remoteName
   private loadedContainers = new Map<string, Container>();
 
   constructor(
@@ -176,40 +321,20 @@ class MfeLoader {
     private config: MfeLoaderConfig = {}
   ) {}
 
-  /**
-   * @internal
-   * Load an MFE from its MfeEntryMF definition
-   */
   async load(entry: MfeEntryMF): Promise<LoadedMfeInternal> {
     // 1. Validate entry against Module Federation entry schema
-    const entryValidation = this.typeSystem.validateInstance(
-      MfeLoader.MF_ENTRY_TYPE_ID,
-      entry
-    );
-    if (!entryValidation.valid) {
-      throw new MfeLoadError('Invalid MfeEntryMF', entryValidation.errors);
-    }
-
     // 2. Resolve and validate manifest
-    const manifest = await this.resolveManifest(entry.manifest);
-
     // 3. Load remote container (cached per remoteName)
-    const container = await this.loadRemoteContainer(manifest);
-
     // 4. Get the exposed module using entry.exposedModule
+    // 5. Validate the module exports mount/unmount functions
+    const manifest = await this.resolveManifest(entry.manifest);
+    const container = await this.loadRemoteContainer(manifest);
     const moduleFactory = await container.get(entry.exposedModule);
-    if (!moduleFactory) {
-      throw new MfeLoadError(
-        `Module '${entry.exposedModule}' not found in container '${manifest.remoteName}'`,
-        []
-      );
-    }
     const loadedModule = moduleFactory();
 
-    // 5. Validate the module exports the required MfeEntryLifecycle interface (mount/unmount)
     if (typeof loadedModule.mount !== 'function' || typeof loadedModule.unmount !== 'function') {
       throw new MfeLoadError(
-        `Module '${entry.exposedModule}' must implement MfeEntryLifecycle interface with mount(container, bridge) and unmount(container) functions`,
+        `Module '${entry.exposedModule}' must implement MfeEntryLifecycle interface`,
         []
       );
     }
@@ -220,46 +345,6 @@ class MfeLoader {
       manifest,
       unload: () => this.unloadIfUnused(manifest.remoteName),
     };
-  }
-
-  private async resolveManifest(manifestTypeId: string): Promise<MfManifest> {
-    if (this.loadedManifests.has(manifestTypeId)) {
-      return this.loadedManifests.get(manifestTypeId)!;
-    }
-
-    const manifest = await this.fetchManifestInstance(manifestTypeId);
-
-    const validation = this.typeSystem.validateInstance(
-      MfeLoader.MF_MANIFEST_TYPE_ID,
-      manifest
-    );
-    if (!validation.valid) {
-      throw new MfeLoadError('Invalid MfManifest', validation.errors);
-    }
-
-    this.loadedManifests.set(manifestTypeId, manifest);
-    return manifest;
-  }
-
-  private async loadRemoteContainer(manifest: MfManifest): Promise<Container> {
-    if (this.loadedContainers.has(manifest.remoteName)) {
-      return this.loadedContainers.get(manifest.remoteName)!;
-    }
-
-    await this.loadScript(manifest.remoteEntry);
-
-    const container = (window as any)[manifest.remoteName];
-    if (!container) {
-      throw new MfeLoadError(
-        `Container '${manifest.remoteName}' not found after loading ${manifest.remoteEntry}`,
-        []
-      );
-    }
-
-    await container.init(__webpack_share_scopes__.default);
-
-    this.loadedContainers.set(manifest.remoteName, container);
-    return container;
   }
 
   async preload(entries: MfeEntryMF[]): Promise<void> {
@@ -278,22 +363,14 @@ class MfeLoader {
     );
   }
 
-  private async loadScript(url: string): Promise<void> {
-    // Script loading with timeout and error handling
-  }
-
-  private unloadIfUnused(remoteName: string): void {
-    // Cleanup logic
-  }
-
-  private async fetchManifestInstance(manifestTypeId: string): Promise<MfManifest> {
-    // Fetch manifest from registry or remote endpoint
-    throw new Error('Not implemented');
-  }
+  private async resolveManifest(manifestTypeId: string): Promise<MfManifest>;
+  private async loadRemoteContainer(manifest: MfManifest): Promise<Container>;
+  private async loadScript(url: string): Promise<void>;
+  private unloadIfUnused(remoteName: string): void;
 }
 ```
 
-### Decision 18: Manifest Fetching Strategy
+### Decision 12: Manifest Fetching Strategy
 
 The MfeLoader requires a strategy for fetching MfManifest instances from their type IDs.
 
@@ -302,21 +379,10 @@ The MfeLoader requires a strategy for fetching MfManifest instances from their t
 ```typescript
 // packages/screensets/src/mfe/loader/manifest-fetcher.ts
 
-/**
- * Strategy for fetching MfManifest instances
- */
 interface ManifestFetcher {
-  /**
-   * Fetch a manifest by its type ID
-   * @param manifestTypeId - GTS type ID for the MfManifest
-   * @returns The manifest instance
-   */
   fetch(manifestTypeId: string): Promise<MfManifest>;
 }
 
-/**
- * URL-based manifest fetcher - fetches manifest JSON from a URL pattern
- */
 class UrlManifestFetcher implements ManifestFetcher {
   constructor(
     private readonly urlResolver: (manifestTypeId: string) => string,
@@ -326,22 +392,13 @@ class UrlManifestFetcher implements ManifestFetcher {
   async fetch(manifestTypeId: string): Promise<MfManifest> {
     const url = this.urlResolver(manifestTypeId);
     const response = await fetch(url, this.fetchOptions);
-
     if (!response.ok) {
-      throw new MfeLoadError(
-        `Failed to fetch manifest: ${response.status} ${response.statusText}`,
-        manifestTypeId
-      );
+      throw new MfeLoadError(`Failed to fetch manifest: ${response.status}`, manifestTypeId);
     }
-
-    const manifest = await response.json();
-    return manifest as MfManifest;
+    return response.json();
   }
 }
 
-/**
- * Registry-based manifest fetcher - looks up manifests from a pre-registered map
- */
 class RegistryManifestFetcher implements ManifestFetcher {
   private readonly manifests = new Map<string, MfManifest>();
 
@@ -352,18 +409,12 @@ class RegistryManifestFetcher implements ManifestFetcher {
   async fetch(manifestTypeId: string): Promise<MfManifest> {
     const manifest = this.manifests.get(manifestTypeId);
     if (!manifest) {
-      throw new MfeLoadError(
-        `Manifest not found in registry`,
-        manifestTypeId
-      );
+      throw new MfeLoadError(`Manifest not found in registry`, manifestTypeId);
     }
     return manifest;
   }
 }
 
-/**
- * Composite fetcher - tries multiple strategies in order
- */
 class CompositeManifestFetcher implements ManifestFetcher {
   constructor(private readonly fetchers: ManifestFetcher[]) {}
 
@@ -375,48 +426,26 @@ class CompositeManifestFetcher implements ManifestFetcher {
         continue;
       }
     }
-    throw new MfeLoadError(
-      `Manifest not found by any fetcher`,
-      manifestTypeId
-    );
+    throw new MfeLoadError(`Manifest not found by any fetcher`, manifestTypeId);
   }
-}
-
-/**
- * MfeLoader configuration with manifest fetching
- */
-interface MfeLoaderConfig {
-  /** Timeout for bundle loading in ms (default: 30000) */
-  timeout?: number;
-  /** Retry attempts on load failure (default: 2) */
-  retries?: number;
-  /** Enable preloading of known MFEs */
-  preload?: boolean;
-  /** Strategy for fetching manifests */
-  manifestFetcher: ManifestFetcher;
 }
 ```
 
 #### Usage Example
 
 ```typescript
-// Configure loader with URL-based fetching
+// URL-based fetching
 const loader = new MfeLoader(typeSystem, {
   manifestFetcher: new UrlManifestFetcher(
     (typeId) => `https://mfe-registry.example.com/manifests/${encodeURIComponent(typeId)}.json`
   ),
 });
 
-// Or with pre-registered manifests
+// Pre-registered manifests
 const registryFetcher = new RegistryManifestFetcher();
 registryFetcher.register(analyticsManifest);
-registryFetcher.register(billingManifest);
 
-const loader = new MfeLoader(typeSystem, {
-  manifestFetcher: registryFetcher,
-});
-
-// Or composite strategy (try registry first, then URL)
+// Composite strategy (try registry first, then URL)
 const loader = new MfeLoader(typeSystem, {
   manifestFetcher: new CompositeManifestFetcher([
     registryFetcher,
@@ -434,11 +463,8 @@ const loader = new MfeLoader(typeSystem, {
 | Type System plugin complexity | Provide comprehensive GTS plugin as reference implementation |
 | Contract validation overhead | Cache validation results, validate once at registration |
 | Module Federation bundle size | Tree-shaking, shared dependencies, lazy loading |
-| Hierarchical domain complexity | Clear documentation, example implementations |
-| Actions chain timeout | Configurable timeouts with fallback support |
 | Manifest discovery | Multiple fetching strategies (registry, URL, composite) |
 | Dynamic registration race conditions | Sequential registration with async/await, event-based coordination |
-| Backend provider latency | Local caching, optimistic updates, loading states |
 
 ## Testing Strategy
 

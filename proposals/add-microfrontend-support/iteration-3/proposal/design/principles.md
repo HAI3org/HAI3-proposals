@@ -6,12 +6,31 @@ This document covers the core architectural principles for the MFE system.
 - [MFE API](./mfe-api.md) - MfeEntryLifecycle, MfeBridge interfaces
 - [MFE Actions](./mfe-actions.md) - Action and ActionsChain types
 - [Registry and Runtime](./registry-runtime.md) - Runtime isolation, dynamic registration
+- [MFE Loading](./mfe-loading.md) - MfeHandler abstract class, handler registry
+
+---
+
+## Core Principles
+
+1. **Thin Public Contracts** - The public interface is minimal and stable
+2. **Instance-Level Runtime Isolation (Default)** - HAI3's default handler enforces isolation where each MFE instance has its own isolated runtime. Custom handlers can implement different isolation strategies.
+3. **Extensibility via Handlers** - Companies extend via custom handlers, not core changes. This includes custom isolation strategies.
+4. **MFE Independence (Default)** - With HAI3's default handler, each MFE instance takes full responsibility for its own needs; custom handlers can allow resource sharing for internal MFEs
+5. **Hierarchical Composition** - Domains can exist at any level; MFEs can be both extensions and domain providers
+
+---
+
+## Extensibility via Handlers
+
+Companies extend the MFE system by creating custom derived entry types, custom handlers, and custom bridge factories - NOT by modifying HAI3 core. This keeps the core thin and stable for 3rd-party vendors while allowing enterprises to add richness for internal MFEs.
+
+See [MFE Loading - Decision 10](./mfe-loading.md#decision-10-mfehandler-abstraction-and-registry) for implementation details including MfeHandler, MfeBridgeFactory, and handler registry patterns.
 
 ---
 
 ## MFE Independence with Thin Public Contracts
 
-**What**: Each MFE is maximally independent with a thin public contract. The public interface (MfeEntryLifecycle, MfeBridge, actions) is the ONLY required coupling between host and MFE.
+**What**: Each MFE **instance** is maximally independent with a thin public contract. The public interface (MfeEntryLifecycle, MfeBridge, actions) is the ONLY required coupling between parent and MFE instance.
 
 **Why**:
 - Easy to version and maintain compatibility
@@ -19,7 +38,7 @@ This document covers the core architectural principles for the MFE system.
 - MFE developers take full responsibility for their own needs
 - Each MFE evolves independently
 
-### Architecture: Thin Contracts, Full Ownership
+### Default Architecture: Thin Contracts, Full Ownership
 
 ```
 +--------------------------------------------------------------------+
@@ -51,15 +70,17 @@ This document covers the core architectural principles for the MFE system.
                    +------------------+
 ```
 
-Each MFE has:
+With HAI3's default handler, each MFE **instance** has:
 - **Own API services**: Makes its own API requests
 - **Own router**: Manages its own internal navigation
-- **Own state**: Isolated state container
+- **Own state**: Isolated state container (isolated from other instances, even of the same MFE entry)
 - **Full responsibility**: MFE developers control their stack
+
+Custom handlers can choose to share some of these resources between internal MFE instances when isolation is not required.
 
 ### The Trade-off and Solution
 
-**Trade-off**: Duplicate API requests may occur if multiple MFEs need the same data.
+**Trade-off**: Duplicate API requests may occur if multiple MFE instances need the same data.
 
 **Solution**: Optimizations happen through **optional private libraries**, NOT through public contracts:
 
@@ -85,7 +106,7 @@ const user = await api.get('/users/123');
 ```
 
 **Key Characteristics:**
-1. **Each MFE gets its own instance** - No singleton, full isolation semantics
+1. **Each MFE instance gets its own library instance** - No singleton, full isolation semantics
 2. **Libraries sync cache implicitly** - Transparent to MFE code
 3. **Opt-in optimization** - MFE can use axios instead; system still works, just no cache sharing
 4. **No public contract changes** - Optimizations don't affect MfeBridge or action interfaces
@@ -104,17 +125,17 @@ PUBLIC (Architecture Level)     PRIVATE (Implementation Level)
 ```
 
 **Applies to**:
-- API services (each MFE has its own, library may optimize)
-- Routers (each MFE has its own, no sharing needed)
-- Any potential "singleton service" pattern (avoided in favor of per-MFE instances)
+- API services (each MFE instance has its own, library may optimize)
+- Routers (each MFE instance has its own, no sharing needed)
+- Any potential "singleton service" pattern (avoided in favor of per-instance isolation)
 
 ### Trade-offs and Clarifications
 
 **1. Memory Overhead**
 
-The concern about duplicate service instances is about **runtime memory**, not **bundle size**. Module Federation 2.0 handles bundle sharing at load time - code isn't duplicated on disk or over the network. Only runtime instances are duplicated in memory.
+The concern about duplicate service instances is about **runtime memory**, not **bundle size**. Module Federation 2.0 handles bundle sharing at load time - code isn't duplicated on disk or over the network. Only runtime instances are duplicated in memory (one per MFE instance).
 
-This is an acceptable trade-off for the independence benefits. If memory becomes a measurable issue, the private optimization layer can address it without changing public contracts.
+This is an acceptable trade-off for the instance-level isolation benefits. If memory becomes a measurable issue, the private optimization layer can address it without changing public contracts.
 
 **2. Cache Invalidation Complexity**
 
@@ -122,15 +143,15 @@ Cache invalidation would be equally complex for a singleton service approach. Th
 
 **3. Opt-in Optimization**
 
-MFEs can use axios, fetch, or any HTTP client instead of `@hai3/api` - the system still works, just without cross-MFE cache optimization. This is intentional: **graceful degradation over mandatory coupling**.
+MFE instances can use axios, fetch, or any HTTP client instead of `@hai3/api` - the system still works, just without cross-instance cache optimization. This is intentional: **graceful degradation over mandatory coupling**.
 
-Adding cache keys or coordination metadata to the public MFE contract would defeat the thin contracts principle. If optimization requires MFE-level declarations, we're back to tight coupling. The optimization must remain at the library level to preserve MFE independence.
+Adding cache keys or coordination metadata to the public MFE contract would defeat the thin contracts principle. If optimization requires MFE-level declarations, we're back to tight coupling. The optimization must remain at the library level to preserve MFE instance independence.
 
 ### Guarantees and Scope
 
-**1. Cross-MFE Data Consistency**
+**1. Cross-Instance Data Consistency**
 
-Cross-MFE data consistency IS guaranteed at the architecture level when HAI3's own tooling is used (e.g., `@hai3/api`). This guarantee holds even across different frameworks (React, Vue, Angular, Svelte). MFEs using third-party HTTP clients (axios, fetch) opt out of this guarantee but the system continues to function.
+Cross-instance data consistency IS guaranteed at the architecture level when HAI3's own tooling is used (e.g., `@hai3/api`). This guarantee holds even across different frameworks (React, Vue, Angular, Svelte) and across multiple instances of the same MFE entry. MFE instances using third-party HTTP clients (axios, fetch) opt out of this guarantee but the system continues to function.
 
 **2. Platform-Level Shared Data**
 

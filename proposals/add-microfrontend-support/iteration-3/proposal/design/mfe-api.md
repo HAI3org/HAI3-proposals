@@ -6,12 +6,12 @@ This document covers the MFE Bridge interfaces, MfeEntryLifecycle interface, and
 
 ## Context
 
-The MFE API defines the runtime contract between host and MFE. It consists of:
+The MFE API defines the runtime contract between parent and MFE instance. It consists of:
 - **MfeEntryLifecycle**: The interface every MFE must export (mount/unmount methods)
-- **MfeBridge**: The communication channel passed to MFEs for host interaction
-- **MfeBridgeConnection**: Extended bridge interface used by the host to manage MFE communication
+- **MfeBridge**: The communication channel passed to each MFE **instance** for parent interaction
+- **MfeBridgeConnection**: Extended bridge interface used by the parent to manage MFE instance communication
 
-These interfaces are framework-agnostic - MFEs can use React, Vue, Angular, Svelte, or vanilla JS while implementing the same lifecycle contract. The MfeBridge allows MFEs to send [actions chains](./mfe-actions.md) (targeting the domain) and subscribe to [shared properties](./mfe-shared-property.md).
+These interfaces are framework-agnostic - MFEs can use React, Vue, Angular, Svelte, or vanilla JS while implementing the same lifecycle contract. Each MFE **instance** receives its own MfeBridge instance (even multiple instances of the same MFE entry get separate bridges). The MfeBridge allows MFE instances to send [actions chains](./mfe-actions.md) (targeting the domain) and subscribe to [shared properties](./mfe-shared-property.md).
 
 ## Definition
 
@@ -26,40 +26,8 @@ These interfaces are framework-agnostic - MFEs can use React, Vue, Angular, Svel
 ## MfeEntryLifecycle Interface
 
 ```typescript
-/**
- * Lifecycle interface for MFE entries.
- * Defines lifecycle methods that any MFE entry must implement,
- * regardless of framework (React, Vue, Angular, Vanilla JS).
- *
- * The name "MfeEntryLifecycle" is chosen because:
- * - It focuses on lifecycle semantics (mount/unmount)
- * - It's extensible for future lifecycle methods (onSuspend, onResume, etc.)
- * - It doesn't include implementation details like "Export" or "Module" in the name
- *
- * NOTE: This is a runtime interface for MFE entries, NOT a GTS type.
- * It is not registered in the Type System - it's a TypeScript interface for code contracts.
- *
- * Example implementations:
- * - React MFE: Uses ReactDOM.createRoot(container).render(<App bridge={bridge} />)
- * - Vue MFE: Uses createApp(App, { bridge }).mount(container)
- * - Angular MFE: Uses platformBrowserDynamic().bootstrapModule(...)
- * - Svelte MFE: Uses new App({ target: container, props: { bridge } })
- * - Vanilla JS: Directly manipulates DOM
- */
 interface MfeEntryLifecycle {
-  /**
-   * Mount the MFE into a container element.
-   * @param container - The DOM element to mount into (typically a shadow root)
-   * @param bridge - The MfeBridge for host-MFE communication
-   */
   mount(container: HTMLElement, bridge: MfeBridge): void;
-
-  /**
-   * Unmount the MFE from a container element.
-   * Called when the extension is unloaded or the container is removed.
-   * Should clean up all DOM content and unsubscribe from bridge.
-   * @param container - The DOM element to unmount from
-   */
   unmount(container: HTMLElement): void;
 }
 ```
@@ -68,57 +36,30 @@ interface MfeEntryLifecycle {
 
 ## MFE Bridge Interfaces
 
-The MFE Bridge provides a bidirectional communication channel between host and MFE. The bridge is created by the host when mounting an extension and passed to the MFE component via props.
+The MFE Bridge provides a bidirectional communication channel between parent and MFE instance. With HAI3's default handler (`MfeHandlerMF`), each MFE **instance** receives its own bridge instance - this supports instance-level isolation. Even multiple instances of the same MFE entry get separate, independent bridges. Custom handlers can implement different bridge sharing strategies for internal MFEs. The bridge is created by the parent when mounting an extension and passed to the MFE component via props.
 
 ### MfeBridge Interface
 
 ```typescript
 // packages/screensets/src/mfe/bridge/types.ts
 
-/**
- * Read-only bridge interface exposed to MFE components.
- * MFEs use this to communicate with the host.
- */
 interface MfeBridge {
-  /** The entry type ID for this MFE instance */
   readonly entryTypeId: string;
-
-  /** The domain type ID this MFE is mounted in */
   readonly domainId: string;
 
-  /**
-   * Send an actions chain targeting this MFE's domain.
-   * Convenience method that creates an ActionsChain with the domain as target.
-   * The bridge validates the payload against the action's schema before sending.
-   * @param actionTypeId - Action type ID (must be in entry's actions list)
-   * @param payload - Action payload (validated against action schema)
-   * @returns Promise that resolves when the action is delivered
-   */
+  /** Send an action to this MFE's domain */
   requestHostAction(actionTypeId: string, payload?: unknown): Promise<void>;
 
-  /**
-   * Subscribe to a shared property from the domain.
-   * @param propertyTypeId - SharedProperty type ID
-   * @param callback - Called with current value and on subsequent updates
-   * @returns Unsubscribe function
-   */
+  /** Subscribe to a shared property from the domain */
   subscribeToProperty(
     propertyTypeId: string,
     callback: (value: unknown) => void
   ): () => void;
 
-  /**
-   * Get current value of a shared property.
-   * @param propertyTypeId - SharedProperty type ID
-   * @returns Current value or undefined if not set
-   */
+  /** Get current value of a shared property */
   getProperty(propertyTypeId: string): unknown;
 
-  /**
-   * Subscribe to all shared properties at once.
-   * @param callback - Called with property map on any property update
-   * @returns Unsubscribe function
-   */
+  /** Subscribe to all shared properties at once */
   subscribeToAllProperties(
     callback: (properties: Map<string, unknown>) => void
   ): () => void;
@@ -130,41 +71,20 @@ interface MfeBridge {
 ```typescript
 /**
  * Extended bridge interface used by the host to manage MFE communication.
- * Created by ScreensetsRegistry when mounting an extension.
+ * Shared property updates are managed at the DOMAIN level via registry.updateDomainProperty().
  */
 interface MfeBridgeConnection extends MfeBridge {
-  /** Unique instance ID for this bridge connection */
   readonly instanceId: string;
 
-  /**
-   * Send an actions chain to the MFE.
-   * Used for domain-to-extension communication.
-   * @param chain - ActionsChain to deliver
-   * @param options - Optional per-request execution options (override defaults)
-   * @returns ChainResult indicating execution outcome
-   */
+  /** Send an actions chain to the MFE */
   sendActionsChain(chain: ActionsChain, options?: ChainExecutionOptions): Promise<ChainResult>;
 
-  /**
-   * Update a shared property value.
-   * Notifies all subscribers in the MFE.
-   * @param propertyTypeId - SharedProperty type ID
-   * @param value - New property value
-   */
-  updateProperty(propertyTypeId: string, value: unknown): void;
-
-  /**
-   * Register handler for actions coming from the MFE.
-   * @param handler - Callback invoked when MFE requests host action
-   */
+  /** Register handler for actions coming from the MFE */
   onHostAction(
     handler: (actionTypeId: string, payload: unknown) => Promise<void>
   ): void;
 
-  /**
-   * Clean up the bridge connection.
-   * Unsubscribes all listeners and releases resources.
-   */
+  /** Clean up the bridge connection */
   dispose(): void;
 }
 ```
@@ -172,18 +92,62 @@ interface MfeBridgeConnection extends MfeBridge {
 ### Bridge Creation Flow
 
 ```typescript
-// When mounting an extension - the public API handles loading and mounting internally
+// When mounting an extension
 const bridge = await runtime.mountExtension(extensionId, container);
 
-// Internally, the runtime:
-// 1. Loads the MFE bundle via MfeLoader (internal implementation detail)
-// 2. Gets the MfeEntryLifecycle from the loaded module
-// 3. Calls lifecycle.mount(container, bridge)
-// 4. Returns the bridge for host-MFE communication
-
-// When unmounting - also handled by the public API
+// When unmounting
 await runtime.unmountExtension(extensionId);
-// Internally calls lifecycle.unmount(container) and cleans up bridge
+```
+
+### Domain-Level Property Updates
+
+Shared properties are managed at the DOMAIN level, not per-MFE. When the host updates a domain property, ALL extensions in that domain that subscribe to that property receive the update.
+
+```
++------------------------------------------+
+|                 HOST                      |
+|                                          |
+|  runtime.updateDomainProperty(           |
+|    domainId,                             |
+|    "theme",                              |
+|    "dark"                                |
+|  )                                       |
++--------------------+---------------------+
+                     |
+                     v
++--------------------+---------------------+
+|              DOMAIN                      |
+|  (stores property value)                 |
+|                                          |
+|  theme: "dark"                           |
++----+---------------+----------------+----+
+     |               |                |
+     v               v                v
++----+----+    +-----+----+    +-----+----+
+|Extension|    |Extension |    |Extension |
+|    A    |    |    B     |    |    C     |
++---------+    +----------+    +----------+
+|subscribed|   |subscribed|    |   NOT    |
+|to theme  |   |to theme  |    |subscribed|
++---------+    +----------+    +----------+
+     |               |                |
+     v               v                X
+ RECEIVES        RECEIVES         (no update)
+ "dark"          "dark"
+```
+
+**Key Points:**
+- Properties are stored at the domain level
+- Only extensions that subscribe to a property receive updates
+- Subscription is determined by the entry's `requiredProperties` or `optionalProperties`
+
+```typescript
+// Update a shared property for all subscribed extensions in the domain
+runtime.updateDomainProperty(
+  'gts.hai3.screensets.ext.domain.v1~acme.dashboard.layout.widget_slot.v1~',
+  'gts.hai3.screensets.ext.shared_property.v1~hai3.screensets.props.theme.v1',
+  'dark'
+);
 ```
 
 ---
@@ -192,7 +156,6 @@ await runtime.unmountExtension(extensionId);
 
 **React MFE:**
 ```typescript
-// mfe-entry.tsx - React MFE export
 import { createRoot, Root } from 'react-dom/client';
 import { MfeBridge } from '@hai3/screensets';
 import { App } from './App';
@@ -212,7 +175,6 @@ export function unmount(container: HTMLElement): void {
 
 **Vue 3 MFE:**
 ```typescript
-// mfe-entry.ts - Vue 3 MFE export
 import { createApp, App as VueApp } from 'vue';
 import { MfeBridge } from '@hai3/screensets';
 import App from './App.vue';
@@ -232,17 +194,13 @@ export function unmount(container: HTMLElement): void {
 
 **Svelte MFE:**
 ```typescript
-// mfe-entry.ts - Svelte MFE export
 import { MfeBridge } from '@hai3/screensets';
 import App from './App.svelte';
 
 let component: App | null = null;
 
 export function mount(container: HTMLElement, bridge: MfeBridge): void {
-  component = new App({
-    target: container,
-    props: { bridge }
-  });
+  component = new App({ target: container, props: { bridge } });
 }
 
 export function unmount(container: HTMLElement): void {
@@ -253,13 +211,10 @@ export function unmount(container: HTMLElement): void {
 
 **Vanilla JS MFE:**
 ```typescript
-// mfe-entry.ts - Vanilla JS MFE export
 import { MfeBridge } from '@hai3/screensets';
 
 export function mount(container: HTMLElement, bridge: MfeBridge): void {
   container.innerHTML = '<div class="my-widget">Loading...</div>';
-
-  // Subscribe to properties
   bridge.subscribeToProperty(
     'gts.hai3.screensets.ext.shared_property.v1~hai3.screensets.props.theme.v1',
     (theme) => {
